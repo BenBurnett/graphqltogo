@@ -21,9 +21,9 @@ type GraphQLResponse struct {
 	Errors []map[string]interface{} `json:"errors"`
 }
 
-func (client *GraphQLClient) Query(query string, variables map[string]interface{}, target interface{}) error {
+func (client *GraphQLClient) Execute(operation string, variables map[string]interface{}, target interface{}) error {
 	requestBody, err := json.Marshal(map[string]interface{}{
-		"query":     query,
+		"query":     operation,
 		"variables": variables,
 	})
 	if err != nil {

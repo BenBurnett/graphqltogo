@@ -10,6 +10,10 @@ type HelloResponse struct {
 	Hello string `json:"hello"`
 }
 
+type EchoResponse struct {
+	Echo string `json:"echo"`
+}
+
 const HelloQuery = `
 	query {
 		hello
@@ -22,12 +26,18 @@ const ErrorQuery = `
 	}
 `
 
+const EchoMutation = `
+	mutation($message: String!) {
+		echo(message: $message)
+	}
+`
+
 func main() {
 	client := graphqltogo.NewClient("http://localhost:4000/graphql")
 
 	// Query Hello
 	var helloResult HelloResponse
-	err := client.Query(HelloQuery, nil, &helloResult)
+	err := client.Execute(HelloQuery, nil, &helloResult)
 	if err != nil {
 		fmt.Println("Error:", err)
 		return
@@ -35,9 +45,17 @@ func main() {
 	fmt.Println("Hello Response:", helloResult.Hello)
 
 	// Query Error
-	err = client.Query(ErrorQuery, nil, &struct{}{})
+	err = client.Execute(ErrorQuery, nil, &struct{}{})
 	if err != nil {
 		fmt.Println("Error from errorQuery:", err)
+	}
+
+	// Mutation Echo
+	var echoResult EchoResponse
+	err = client.Execute(EchoMutation, map[string]interface{}{"message": "Hello, mutation!"}, &echoResult)
+	if err != nil {
+		fmt.Println("Error from echo mutation:", err)
 		return
 	}
+	fmt.Println("Echo Response:", echoResult.Echo)
 }
