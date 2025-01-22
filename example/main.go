@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/BenBurnett/graphqltogo"
 )
@@ -32,6 +33,12 @@ const EchoMutation = `
 	}
 `
 
+const SubscriptionQuery = `
+	subscription {
+		messageSent
+	}
+`
+
 func main() {
 	client := graphqltogo.NewClient("http://localhost:4000/graphql")
 
@@ -58,4 +65,26 @@ func main() {
 		return
 	}
 	fmt.Println("Echo Response:", echoResult.Echo)
+
+	// Subscription
+	err = client.Subscribe(SubscriptionQuery, nil, func(data map[string]interface{}) {
+		fmt.Println("Subscription message received:", data["messageSent"])
+	}, func(err error) {
+		fmt.Println("Subscription error:", err)
+	})
+	if err != nil {
+		fmt.Println("Error from subscription:", err)
+		return
+	}
+
+	// Mutation Echo
+	err = client.Execute(EchoMutation, map[string]interface{}{"message": "Hello, mutation again!"}, &echoResult)
+	if err != nil {
+		fmt.Println("Error from echo mutation:", err)
+		return
+	}
+	fmt.Println("Echo Response:", echoResult.Echo)
+
+	// Keep the main function running to receive subscription messages
+	time.Sleep(10 * time.Second)
 }
