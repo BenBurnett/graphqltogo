@@ -2,6 +2,7 @@ package graphqltogo
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -32,31 +33,31 @@ func (client *GraphQLClient) Execute(operation string, variables map[string]inte
 		"variables": variables,
 	})
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to marshal request body: %w", err)
 	}
 
 	req, err := http.NewRequest("POST", client.endpoint, bytes.NewBuffer(requestBody))
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create new request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	clientHTTP := &http.Client{}
 	resp, err := clientHTTP.Do(req)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to execute request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to read response body: %w", err)
 	}
 
 	var result GraphQLResponse
 	err = json.Unmarshal(body, &result)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to unmarshal response body: %w", err)
 	}
 
 	if len(result.Errors) > 0 {
@@ -65,15 +66,10 @@ func (client *GraphQLClient) Execute(operation string, variables map[string]inte
 
 	data, err := json.Marshal(result.Data)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to marshal response data: %w", err)
 	}
 
-	err = json.Unmarshal(data, target)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return json.Unmarshal(data, target)
 }
 
 func (client *GraphQLClient) Subscribe(operation string, variables map[string]interface{}, onMessage func(data map[string]interface{}), onError func(err error)) error {
@@ -95,10 +91,8 @@ func (client *GraphQLClient) Subscribe(operation string, variables map[string]in
 		} else {
 			fmt.Println("Dial error:", err)
 		}
-		return err
+		return fmt.Errorf("failed to dial WebSocket: %w", err)
 	}
-
-	// defer conn.Close()
 
 	initMessage := map[string]interface{}{
 		"type": "connection_init",
@@ -112,48 +106,49 @@ func (client *GraphQLClient) Subscribe(operation string, variables map[string]in
 		},
 	}
 
-	// Send the connection_init message
-	err = conn.WriteJSON(initMessage)
-	if err != nil {
+	if err := conn.WriteJSON(initMessage); err != nil {
 		conn.Close()
-		return err
+		return fmt.Errorf("failed to send init message: %w", err)
 	}
 
-	// Send the start message
-	err = conn.WriteJSON(startMessage)
-	if err != nil {
+	if err := conn.WriteJSON(startMessage); err != nil {
 		conn.Close()
-		return err
+		return fmt.Errorf("failed to send start message: %w", err)
 	}
+
+	ctx, cancel := context.WithCancel(context.Background())
 
 	interrupt := make(chan os.Signal, 1)
 	signal.Notify(interrupt, os.Interrupt, syscall.SIGTERM)
 
 	go func() {
 		defer conn.Close()
+		defer cancel()
 		for {
 			select {
 			case <-interrupt:
 				fmt.Println("Received interrupt signal, closing connection...")
 				conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 				return
+			case <-ctx.Done():
+				fmt.Println("Context cancelled, closing connection...")
+				conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+				return
 			default:
 				_, message, err := conn.ReadMessage()
 				if err != nil {
-					onError(err)
+					onError(fmt.Errorf("failed to read message: %w", err))
 					return
 				}
 
 				var result map[string]interface{}
-				err = json.Unmarshal(message, &result)
-				if err != nil {
-					onError(err)
+				if err := json.Unmarshal(message, &result); err != nil {
+					onError(fmt.Errorf("failed to unmarshal message: %w", err))
 					return
 				}
 
 				switch result["type"] {
 				case "data":
-					fmt.Println("Received data:", result["payload"])
 					payload := result["payload"].(map[string]interface{})
 					onMessage(payload["data"].(map[string]interface{}))
 				case "error":

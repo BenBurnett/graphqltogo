@@ -86,5 +86,5 @@ func main() {
 	fmt.Println("Echo Response:", echoResult.Echo)
 
 	// Keep the main function running to receive subscription messages
-	time.Sleep(10 * time.Second)
+	time.Sleep(5 * time.Second)
 }
