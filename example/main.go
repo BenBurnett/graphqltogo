@@ -41,6 +41,7 @@ const SubscriptionQuery = `
 
 func main() {
 	client := graphqltogo.NewClient("http://localhost:4000/graphql")
+	defer client.Close()
 
 	// Query Hello
 	var helloResult HelloResponse
@@ -67,7 +68,7 @@ func main() {
 	fmt.Println("Echo Response:", echoResult.Echo)
 
 	// Subscription
-	err = client.Subscribe(SubscriptionQuery, nil, func(data map[string]interface{}) {
+	subId, err := client.Subscribe(SubscriptionQuery, nil, func(data map[string]interface{}) {
 		fmt.Println("Subscription message received:", data["messageSent"])
 	}, func(err error) {
 		fmt.Println("Subscription error:", err)
@@ -76,6 +77,7 @@ func main() {
 		fmt.Println("Error from subscription:", err)
 		return
 	}
+	fmt.Printf("Waiting for subscription messages...\n\n\n")
 
 	// Mutation Echo
 	err = client.Execute(EchoMutation, map[string]interface{}{"message": "Hello, mutation again!"}, &echoResult)
@@ -84,6 +86,13 @@ func main() {
 		return
 	}
 	fmt.Println("Echo Response:", echoResult.Echo)
+
+	// Unsubscribe
+	err = client.Unsubscribe(subId)
+	if err != nil {
+		fmt.Println("Error from unsubscribe:", err)
+		return
+	}
 
 	// Keep the main function running to receive subscription messages
 	time.Sleep(5 * time.Second)
