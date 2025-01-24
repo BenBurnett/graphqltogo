@@ -2,15 +2,13 @@ package graphqltogo
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"os"
-	"os/signal"
+	"strconv"
 	"sync"
-	"syscall"
+	"sync/atomic"
 
 	"github.com/gorilla/websocket"
 )
@@ -19,9 +17,9 @@ type GraphQLClient struct {
 	endpoint   string
 	wsEndpoint string
 	conn       *websocket.Conn
-	subCount   int
-	subID      int
+	counter    int64
 	mu         sync.Mutex
+	subs       map[string]chan interface{}
 }
 
 func NewClient(endpoint string) *GraphQLClient {
@@ -29,7 +27,15 @@ func NewClient(endpoint string) *GraphQLClient {
 	if wsEndpoint[:4] == "http" {
 		wsEndpoint = "ws" + wsEndpoint[4:]
 	}
-	return &GraphQLClient{endpoint: endpoint, wsEndpoint: wsEndpoint}
+	return &GraphQLClient{
+		endpoint:   endpoint,
+		wsEndpoint: wsEndpoint,
+		subs:       make(map[string]chan interface{}),
+	}
+}
+
+func (client *GraphQLClient) generateUniqueID() string {
+	return strconv.FormatInt(atomic.AddInt64(&client.counter, 1), 10)
 }
 
 type GraphQLResponse struct {
@@ -78,7 +84,14 @@ func (client *GraphQLClient) Execute(operation string, variables map[string]inte
 	return nil
 }
 
-func (client *GraphQLClient) openWebSocket(onMessage func(data map[string]interface{}), onError func(err error)) error {
+func (client *GraphQLClient) openWebSocket() error {
+	client.mu.Lock()
+	if client.conn != nil {
+		client.mu.Unlock()
+		return nil
+	}
+	client.mu.Unlock()
+
 	header := http.Header{}
 	header.Set("Sec-WebSocket-Protocol", "graphql-ws")
 
@@ -94,7 +107,10 @@ func (client *GraphQLClient) openWebSocket(onMessage func(data map[string]interf
 		}
 		return fmt.Errorf("failed to dial WebSocket: %w", err)
 	}
+
+	client.mu.Lock()
 	client.conn = conn
+	client.mu.Unlock()
 
 	initMessage := map[string]interface{}{
 		"type": "connection_init",
@@ -103,84 +119,123 @@ func (client *GraphQLClient) openWebSocket(onMessage func(data map[string]interf
 		return fmt.Errorf("failed to send init message: %w", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-
-	interrupt := make(chan os.Signal, 1)
-	signal.Notify(interrupt, os.Interrupt, syscall.SIGTERM)
-
-	go func() {
-		defer cancel()
-		for {
-			select {
-			case <-interrupt:
-				fmt.Println("Received interrupt signal, closing connection...")
-				client.conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
-				return
-			case <-ctx.Done():
-				fmt.Println("Context cancelled, closing connection...")
-				client.conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
-				return
-			default:
-				_, message, err := client.conn.ReadMessage()
-				if err != nil {
-					client.mu.Lock()
-					if client.conn == nil {
-						client.mu.Unlock()
-						return
-					}
-					client.mu.Unlock()
-					fmt.Println("Read error:", err)
-					return
-				}
-
-				var result map[string]interface{}
-				if err := json.Unmarshal(message, &result); err != nil {
-					return
-				}
-
-				switch result["type"] {
-				case "data":
-					// Handle data message
-					if payload, ok := result["payload"].(map[string]interface{}); ok {
-						onMessage(payload["data"].(map[string]interface{}))
-					}
-				case "error":
-					// Handle error message
-					if payload, ok := result["payload"].(map[string]interface{}); ok {
-						onError(fmt.Errorf("subscription error: %v", payload))
-					}
-				case "complete":
-					fmt.Println("Subscription complete")
-					return
-				}
-			}
-		}
-	}()
+	go client.listen()
 
 	return nil
 }
 
-func (client *GraphQLClient) closeWebSocket() {
-	client.conn.Close()
-	client.conn = nil
-	fmt.Println("WebSocket connection closed")
+func (client *GraphQLClient) listen() {
+	for {
+		client.mu.Lock()
+		conn := client.conn
+		client.mu.Unlock()
+
+		if conn == nil {
+			fmt.Println("WebSocket connection is nil, stopping listen goroutine")
+			return
+		}
+
+		var result map[string]interface{}
+		if err := conn.ReadJSON(&result); err != nil {
+			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+				fmt.Println("WebSocket closed:", err)
+			} else {
+				fmt.Println("WebSocket read error:", err)
+			}
+			return
+		}
+
+		messageType := result["type"].(string)
+
+		switch messageType {
+		case "data":
+			subID := result["id"].(string)
+			payload := result["payload"]
+			client.mu.Lock()
+			if subChan, ok := client.subs[subID]; ok {
+				subChan <- payload
+			}
+			client.mu.Unlock()
+
+		case "error":
+			subID := result["id"].(string)
+			payload := result["payload"]
+			client.mu.Lock()
+			if subChan, ok := client.subs[subID]; ok {
+				subChan <- fmt.Errorf("subscription error: %v", payload)
+			}
+			client.mu.Unlock()
+
+		case "complete":
+			fmt.Println("Subscription completed")
+			subID := result["id"].(string)
+			client.mu.Lock()
+			if subChan, ok := client.subs[subID]; ok {
+				close(subChan)
+				delete(client.subs, subID)
+			}
+			shouldClose := len(client.subs) == 0
+			client.mu.Unlock()
+
+			if shouldClose {
+				client.closeWebSocket()
+			}
+
+		case "connection_ack":
+			fmt.Println("WebSocket connection established")
+
+		case "connection_error":
+			fmt.Println("WebSocket connection error:", result["payload"])
+
+		case "connection_keep_alive":
+			if err := conn.WriteJSON(map[string]interface{}{"type": "connection_ack"}); err != nil {
+				fmt.Println("Failed to send connection_ack message:", err)
+				return
+			}
+
+		default:
+			fmt.Println("Unknown message type:", messageType)
+		}
+	}
 }
 
-func (client *GraphQLClient) Subscribe(operation string, variables map[string]interface{}, onMessage func(data map[string]interface{}), onError func(err error)) (int, error) {
+func (client *GraphQLClient) closeWebSocket() {
 	client.mu.Lock()
 	defer client.mu.Unlock()
 
-	if client.conn == nil {
-		if err := client.openWebSocket(onMessage, onError); err != nil {
-			return 0, err
+	if client.conn != nil {
+		closeMessage := map[string]interface{}{
+			"type": "connection_terminate",
 		}
+		if err := client.conn.WriteJSON(closeMessage); err != nil {
+			fmt.Println("Failed to send close message:", err)
+		}
+		if err := client.conn.Close(); err != nil {
+			fmt.Println("Failed to close WebSocket connection:", err)
+		}
+		client.conn = nil
+		fmt.Println("WebSocket connection closed")
+	}
+}
+
+func (client *GraphQLClient) Subscribe(operation string, variables map[string]interface{}) (chan interface{}, string, error) {
+	client.mu.Lock()
+	if client.conn == nil {
+		client.mu.Unlock()
+		if err := client.openWebSocket(); err != nil {
+			return nil, "", err
+		}
+		client.mu.Lock()
 	}
 
-	client.subID++
-	subID := client.subID
+	subID := client.generateUniqueID()
+	subChan := make(chan interface{})
+	client.subs[subID] = subChan
+
+	client.mu.Unlock()
 
 	startMessage := map[string]interface{}{
-		"id":   fmt.Sprintf("%d", subID),
+		"id":   subID,
 		"type": "start",
 		"payload": map[string]interface{}{
 			"query":     operation,
@@ -189,34 +244,37 @@ func (client *GraphQLClient) Subscribe(operation string, variables map[string]in
 	}
 
 	if err := client.conn.WriteJSON(startMessage); err != nil {
-		client.closeWebSocket()
-		return 0, fmt.Errorf("failed to send start message: %w", err)
+		client.mu.Lock()
+		delete(client.subs, subID)
+		shouldClose := len(client.subs) == 0
+		client.mu.Unlock()
+
+		if shouldClose {
+			client.closeWebSocket()
+		}
+		return nil, "", fmt.Errorf("failed to send start message: %w", err)
 	}
 
-	client.subCount++
-	return subID, nil
+	return subChan, subID, nil
 }
 
-func (client *GraphQLClient) Unsubscribe(subID int) error {
+func (client *GraphQLClient) Unsubscribe(subID string) error {
 	client.mu.Lock()
-	defer client.mu.Unlock()
+	conn := client.conn
+	client.mu.Unlock()
 
-	if client.conn == nil {
+	if conn == nil {
 		return fmt.Errorf("no active WebSocket connection")
 	}
 
 	stopMessage := map[string]interface{}{
-		"id":   fmt.Sprintf("%d", subID),
+		"id":   subID,
 		"type": "stop",
 	}
 
-	if err := client.conn.WriteJSON(stopMessage); err != nil {
+	fmt.Println("Unsubscribing from subscription:", subID)
+	if err := conn.WriteJSON(stopMessage); err != nil {
 		return fmt.Errorf("failed to send stop message: %w", err)
-	}
-
-	client.subCount--
-	if client.subCount == 0 {
-		client.closeWebSocket()
 	}
 
 	return nil
@@ -224,9 +282,10 @@ func (client *GraphQLClient) Unsubscribe(subID int) error {
 
 func (client *GraphQLClient) Close() {
 	client.mu.Lock()
-	defer client.mu.Unlock()
-
 	if client.conn != nil {
+		client.mu.Unlock()
 		client.closeWebSocket()
+	} else {
+		client.mu.Unlock()
 	}
 }

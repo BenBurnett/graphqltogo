@@ -68,15 +68,18 @@ func main() {
 	fmt.Println("Echo Response:", echoResult.Echo)
 
 	// Subscription
-	subId, err := client.Subscribe(SubscriptionQuery, nil, func(data map[string]interface{}) {
-		fmt.Println("Subscription message received:", data["messageSent"])
-	}, func(err error) {
-		fmt.Println("Subscription error:", err)
-	})
+	subChan, subID, err := client.Subscribe(SubscriptionQuery, nil)
 	if err != nil {
 		fmt.Println("Error from subscription:", err)
 		return
 	}
+
+	go func() {
+		for msg := range subChan {
+			fmt.Println("Subscription Message:", msg)
+		}
+	}()
+
 	fmt.Printf("Waiting for subscription messages...\n\n\n")
 
 	// Mutation Echo
@@ -87,13 +90,15 @@ func main() {
 	}
 	fmt.Println("Echo Response:", echoResult.Echo)
 
+	// Keep the main function running to receive subscription messages
+	time.Sleep(5 * time.Second)
+
 	// Unsubscribe
-	err = client.Unsubscribe(subId)
+	err = client.Unsubscribe(subID)
 	if err != nil {
 		fmt.Println("Error from unsubscribe:", err)
 		return
 	}
 
-	// Keep the main function running to receive subscription messages
-	time.Sleep(5 * time.Second)
+	time.Sleep(1 * time.Second)
 }
