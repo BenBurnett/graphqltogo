@@ -20,6 +20,7 @@ type GraphQLClient struct {
 	counter    int64
 	mu         sync.Mutex
 	subs       map[string]chan interface{}
+	wg         sync.WaitGroup
 }
 
 func NewClient(endpoint string) *GraphQLClient {
@@ -125,6 +126,9 @@ func (client *GraphQLClient) openWebSocket() error {
 }
 
 func (client *GraphQLClient) listen() {
+	client.wg.Add(1)
+	defer client.wg.Done()
+
 	for {
 		client.mu.Lock()
 		conn := client.conn
@@ -201,8 +205,6 @@ func (client *GraphQLClient) listen() {
 
 func (client *GraphQLClient) closeWebSocket() {
 	client.mu.Lock()
-	defer client.mu.Unlock()
-
 	if client.conn != nil {
 		closeMessage := map[string]interface{}{
 			"type": "connection_terminate",
@@ -214,7 +216,11 @@ func (client *GraphQLClient) closeWebSocket() {
 			fmt.Println("Failed to close WebSocket connection:", err)
 		}
 		client.conn = nil
+		client.mu.Unlock() // Release the lock before waiting
+		client.wg.Wait()
 		fmt.Println("WebSocket connection closed")
+	} else {
+		client.mu.Unlock()
 	}
 }
 
