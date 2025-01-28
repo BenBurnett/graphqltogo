@@ -4,9 +4,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
+
+const maxRetries = 5
+const retryInterval = 2 * time.Second
 
 func (client *GraphQLClient) openWebSocket() error {
 	client.mu.Lock()
@@ -22,9 +26,17 @@ func (client *GraphQLClient) openWebSocket() error {
 		header.Set("Authorization", client.authHeader)
 	}
 
-	fmt.Println("Connecting to WebSocket endpoint:", client.wsEndpoint)
-	conn, resp, err := websocket.DefaultDialer.Dial(client.wsEndpoint, header)
-	if err != nil {
+	var conn *websocket.Conn
+	var resp *http.Response
+	var err error
+
+	for i := 0; i < maxRetries; i++ {
+		fmt.Println("Connecting to WebSocket endpoint:", client.wsEndpoint)
+		conn, resp, err = websocket.DefaultDialer.Dial(client.wsEndpoint, header)
+		if err == nil {
+			break
+		}
+
 		if resp != nil {
 			fmt.Println("Handshake failed with status:", resp.Status)
 			body, _ := io.ReadAll(resp.Body)
@@ -32,7 +44,13 @@ func (client *GraphQLClient) openWebSocket() error {
 		} else {
 			fmt.Println("Dial error:", err)
 		}
-		return fmt.Errorf("failed to dial WebSocket: %w", err)
+
+		fmt.Printf("Retrying in %v...\n", retryInterval)
+		time.Sleep(retryInterval)
+	}
+
+	if err != nil {
+		return fmt.Errorf("failed to dial WebSocket after %d attempts: %w", maxRetries, err)
 	}
 
 	client.mu.Lock()
