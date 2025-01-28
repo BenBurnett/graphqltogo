@@ -1,8 +1,6 @@
 package graphqltogo
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,8 +11,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-type GraphQLClient struct {
-	endpoint   string
+type GraphQLWebSocketClient struct {
 	wsEndpoint string
 	conn       *websocket.Conn
 	counter    int64
@@ -24,70 +21,18 @@ type GraphQLClient struct {
 	closing    bool
 }
 
-func NewClient(endpoint string) *GraphQLClient {
-	wsEndpoint := endpoint
-	if wsEndpoint[:4] == "http" {
-		wsEndpoint = "ws" + wsEndpoint[4:]
-	}
-	return &GraphQLClient{
-		endpoint:   endpoint,
+func NewWebSocketClient(wsEndpoint string) *GraphQLWebSocketClient {
+	return &GraphQLWebSocketClient{
 		wsEndpoint: wsEndpoint,
 		subs:       make(map[string]chan interface{}),
 	}
 }
 
-func (client *GraphQLClient) generateUniqueID() string {
+func (client *GraphQLWebSocketClient) generateUniqueID() string {
 	return strconv.FormatInt(atomic.AddInt64(&client.counter, 1), 10)
 }
 
-type GraphQLResponse struct {
-	Data   interface{}              `json:"data"`
-	Errors []map[string]interface{} `json:"errors"`
-}
-
-func (client *GraphQLClient) Execute(operation string, variables map[string]interface{}, target interface{}) error {
-	// No shared resources are accessed here, so no need for mutex
-	requestBody, err := json.Marshal(map[string]interface{}{
-		"query":     operation,
-		"variables": variables,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to marshal request body: %w", err)
-	}
-
-	req, err := http.NewRequest("POST", client.endpoint, bytes.NewBuffer(requestBody))
-	if err != nil {
-		return fmt.Errorf("failed to create new request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	clientHTTP := &http.Client{}
-	resp, err := clientHTTP.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to execute request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	var result GraphQLResponse
-	result.Data = target
-	err = json.Unmarshal(body, &result)
-	if err != nil {
-		return fmt.Errorf("failed to unmarshal response body: %w", err)
-	}
-
-	if len(result.Errors) > 0 {
-		return fmt.Errorf("GraphQL error: %v", result.Errors[0]["message"])
-	}
-
-	return nil
-}
-
-func (client *GraphQLClient) openWebSocket() error {
+func (client *GraphQLWebSocketClient) openWebSocket() error {
 	client.mu.Lock()
 	if client.conn != nil {
 		client.mu.Unlock()
@@ -127,7 +72,7 @@ func (client *GraphQLClient) openWebSocket() error {
 	return nil
 }
 
-func (client *GraphQLClient) listen() {
+func (client *GraphQLWebSocketClient) listen() {
 	client.wg.Add(1)
 	defer client.wg.Done()
 
@@ -205,7 +150,7 @@ func (client *GraphQLClient) listen() {
 	}
 }
 
-func (client *GraphQLClient) closeWebSocket() {
+func (client *GraphQLWebSocketClient) closeWebSocket() {
 	client.mu.Lock()
 	if client.conn != nil {
 		client.closing = true
@@ -228,7 +173,7 @@ func (client *GraphQLClient) closeWebSocket() {
 	client.mu.Unlock()
 }
 
-func (client *GraphQLClient) Subscribe(operation string, variables map[string]interface{}) (chan interface{}, string, error) {
+func (client *GraphQLWebSocketClient) Subscribe(operation string, variables map[string]interface{}) (chan interface{}, string, error) {
 	client.mu.Lock()
 	if client.conn == nil || client.closing {
 		client.mu.Unlock()
@@ -268,7 +213,7 @@ func (client *GraphQLClient) Subscribe(operation string, variables map[string]in
 	return subChan, subID, nil
 }
 
-func (client *GraphQLClient) Unsubscribe(subID string) error {
+func (client *GraphQLWebSocketClient) Unsubscribe(subID string) error {
 	client.mu.Lock()
 	conn := client.conn
 	client.mu.Unlock()
@@ -290,7 +235,7 @@ func (client *GraphQLClient) Unsubscribe(subID string) error {
 	return nil
 }
 
-func (client *GraphQLClient) Close() {
+func (client *GraphQLWebSocketClient) Close() {
 	client.mu.Lock()
 	if client.conn != nil {
 		client.mu.Unlock()
