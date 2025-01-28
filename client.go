@@ -21,6 +21,7 @@ type GraphQLClient struct {
 	mu         sync.Mutex
 	subs       map[string]chan interface{}
 	wg         sync.WaitGroup
+	closing    bool
 }
 
 func NewClient(endpoint string) *GraphQLClient {
@@ -45,6 +46,7 @@ type GraphQLResponse struct {
 }
 
 func (client *GraphQLClient) Execute(operation string, variables map[string]interface{}, target interface{}) error {
+	// No shared resources are accessed here, so no need for mutex
 	requestBody, err := json.Marshal(map[string]interface{}{
 		"query":     operation,
 		"variables": variables,
@@ -91,7 +93,7 @@ func (client *GraphQLClient) openWebSocket() error {
 		client.mu.Unlock()
 		return nil
 	}
-	client.mu.Unlock()
+	client.mu.Unlock() // Unlock before dialing
 
 	header := http.Header{}
 	header.Set("Sec-WebSocket-Protocol", "graphql-ws")
@@ -206,6 +208,7 @@ func (client *GraphQLClient) listen() {
 func (client *GraphQLClient) closeWebSocket() {
 	client.mu.Lock()
 	if client.conn != nil {
+		client.closing = true
 		closeMessage := map[string]interface{}{
 			"type": "connection_terminate",
 		}
@@ -218,15 +221,16 @@ func (client *GraphQLClient) closeWebSocket() {
 		client.conn = nil
 		client.mu.Unlock() // Release the lock before waiting
 		client.wg.Wait()
+		client.mu.Lock()
+		client.closing = false
 		fmt.Println("WebSocket connection closed")
-	} else {
-		client.mu.Unlock()
 	}
+	client.mu.Unlock()
 }
 
 func (client *GraphQLClient) Subscribe(operation string, variables map[string]interface{}) (chan interface{}, string, error) {
 	client.mu.Lock()
-	if client.conn == nil {
+	if client.conn == nil || client.closing {
 		client.mu.Unlock()
 		if err := client.openWebSocket(); err != nil {
 			return nil, "", err
