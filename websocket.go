@@ -152,6 +152,13 @@ func (client *GraphQLClient) listen() {
 }
 
 func (client *GraphQLClient) reconnect() {
+	client.mu.Lock()
+	if client.closing {
+		client.mu.Unlock()
+		return
+	}
+	client.mu.Unlock()
+
 	client.closeWebSocket()
 	for {
 		fmt.Println("Attempting to reconnect...")
