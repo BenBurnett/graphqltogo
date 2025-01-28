@@ -87,8 +87,10 @@ func (client *GraphQLClient) listen() {
 		if err := conn.ReadJSON(&result); err != nil {
 			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
 				fmt.Println("WebSocket closed:", err)
+				client.reconnect()
 			} else {
 				fmt.Println("WebSocket read error:", err)
+				client.reconnect()
 			}
 			return
 		}
@@ -121,6 +123,8 @@ func (client *GraphQLClient) listen() {
 			if subChan, ok := client.subs[subID]; ok {
 				close(subChan)
 				delete(client.subs, subID)
+				delete(client.subQueries, subID)
+				delete(client.subVars, subID)
 			}
 			shouldClose := len(client.subs) == 0
 			client.mu.Unlock()
@@ -143,6 +147,43 @@ func (client *GraphQLClient) listen() {
 
 		default:
 			fmt.Println("Unknown message type:", messageType)
+		}
+	}
+}
+
+func (client *GraphQLClient) reconnect() {
+	client.closeWebSocket()
+	for {
+		fmt.Println("Attempting to reconnect...")
+		if err := client.openWebSocket(); err == nil {
+			client.resubscribeAll()
+			return
+		}
+		fmt.Printf("Retrying in %v...\n", retryInterval)
+		time.Sleep(retryInterval)
+	}
+}
+
+func (client *GraphQLClient) resubscribeAll() {
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	for subID, subChan := range client.subs {
+		query := client.subQueries[subID]
+		variables := client.subVars[subID]
+		startMessage := map[string]interface{}{
+			"id":   subID,
+			"type": "start",
+			"payload": map[string]interface{}{
+				"query":     query,
+				"variables": variables,
+			},
+		}
+		if err := client.wsConn.WriteJSON(startMessage); err != nil {
+			fmt.Printf("Failed to resubscribe to %s: %v\n", subID, err)
+			close(subChan)
+			delete(client.subs, subID)
+			delete(client.subQueries, subID)
+			delete(client.subVars, subID)
 		}
 	}
 }

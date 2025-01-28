@@ -22,6 +22,8 @@ type GraphQLClient struct {
 	counter      int64
 	mu           sync.Mutex
 	subs         map[string]chan interface{}
+	subQueries   map[string]string
+	subVars      map[string]map[string]interface{}
 	wg           sync.WaitGroup
 	closing      bool
 }
@@ -39,6 +41,8 @@ func NewClient(httpEndpoint string, opts ...ClientOption) *GraphQLClient {
 		httpEndpoint: httpEndpoint,
 		httpClient:   &http.Client{},
 		subs:         make(map[string]chan interface{}),
+		subQueries:   make(map[string]string),
+		subVars:      make(map[string]map[string]interface{}),
 	}
 	for _, opt := range opts {
 		opt(client)
@@ -110,6 +114,8 @@ func (client *GraphQLClient) Subscribe(operation string, variables map[string]in
 	subID := client.generateUniqueID()
 	subChan := make(chan interface{})
 	client.subs[subID] = subChan
+	client.subQueries[subID] = operation
+	client.subVars[subID] = variables
 
 	client.mu.Unlock()
 
@@ -125,6 +131,8 @@ func (client *GraphQLClient) Subscribe(operation string, variables map[string]in
 	if err := client.wsConn.WriteJSON(startMessage); err != nil {
 		client.mu.Lock()
 		delete(client.subs, subID)
+		delete(client.subQueries, subID)
+		delete(client.subVars, subID)
 		shouldClose := len(client.subs) == 0
 		client.mu.Unlock()
 
@@ -155,6 +163,12 @@ func (client *GraphQLClient) Unsubscribe(subID string) error {
 	if err := conn.WriteJSON(stopMessage); err != nil {
 		return fmt.Errorf("failed to send stop message: %w", err)
 	}
+
+	client.mu.Lock()
+	delete(client.subs, subID)
+	delete(client.subQueries, subID)
+	delete(client.subVars, subID)
+	client.mu.Unlock()
 
 	return nil
 }
