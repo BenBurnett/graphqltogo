@@ -40,7 +40,7 @@ const SubscriptionQuery = `
 `
 
 func main() {
-	client := graphqltogo.NewClient("http://localhost:4000/graphql")
+	client := graphqltogo.NewClient("http://localhost:4000/graphql", graphqltogo.WithWebSocket("ws://localhost:4000/graphql"))
 	defer client.Close()
 
 	// Query Hello

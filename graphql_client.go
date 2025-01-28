@@ -5,15 +5,22 @@ type GraphQLClient struct {
 	*GraphQLWebSocketClient
 }
 
-func NewClient(endpoint string) *GraphQLClient {
-	wsEndpoint := endpoint
-	if wsEndpoint[:4] == "http" {
-		wsEndpoint = "ws" + wsEndpoint[4:]
+type ClientOption func(*GraphQLClient)
+
+func WithWebSocket(wsEndpoint string) ClientOption {
+	return func(client *GraphQLClient) {
+		client.GraphQLWebSocketClient = NewWebSocketClient(wsEndpoint)
 	}
-	return &GraphQLClient{
-		GraphQLHTTPClient:      NewHTTPClient(endpoint),
-		GraphQLWebSocketClient: NewWebSocketClient(wsEndpoint),
+}
+
+func NewClient(endpoint string, opts ...ClientOption) *GraphQLClient {
+	client := &GraphQLClient{
+		GraphQLHTTPClient: NewHTTPClient(endpoint),
 	}
+	for _, opt := range opts {
+		opt(client)
+	}
+	return client
 }
 
 type GraphQLResponse struct {
