@@ -14,18 +14,19 @@ import (
 )
 
 type GraphQLClient struct {
-	httpEndpoint string
-	wsEndpoint   string
-	authHeader   string
-	httpClient   *http.Client
-	wsConn       *websocket.Conn
-	counter      int64
-	mu           sync.Mutex
-	subs         map[string]chan interface{}
-	subQueries   map[string]string
-	subVars      map[string]map[string]interface{}
-	wg           sync.WaitGroup
-	closing      bool
+	httpEndpoint     string
+	wsEndpoint       string
+	authHeader       string
+	httpClient       *http.Client
+	wsConn           *websocket.Conn
+	counter          int64
+	mu               sync.Mutex
+	subs             map[string]chan interface{}
+	subQueries       map[string]string
+	subVars          map[string]map[string]interface{}
+	wg               sync.WaitGroup
+	closing          bool
+	authErrorHandler func()
 }
 
 type ClientOption func(*GraphQLClient)
@@ -52,6 +53,10 @@ func NewClient(httpEndpoint string, opts ...ClientOption) *GraphQLClient {
 
 func (client *GraphQLClient) SetAuthHeader(authHeader string) {
 	client.authHeader = authHeader
+}
+
+func (client *GraphQLClient) SetAuthErrorHandler(handler func()) {
+	client.authErrorHandler = handler
 }
 
 func (client *GraphQLClient) Execute(operation string, variables map[string]interface{}, target interface{}) error {

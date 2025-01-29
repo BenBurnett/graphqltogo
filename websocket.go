@@ -22,9 +22,6 @@ func (client *GraphQLClient) openWebSocket() error {
 
 	header := http.Header{}
 	header.Set("Sec-WebSocket-Protocol", "graphql-transport-ws")
-	if client.authHeader != "" {
-		header.Set("Authorization", client.authHeader)
-	}
 
 	var conn *websocket.Conn
 	var resp *http.Response
@@ -59,6 +56,9 @@ func (client *GraphQLClient) openWebSocket() error {
 
 	initMessage := map[string]interface{}{
 		"type": "connection_init",
+		"payload": map[string]interface{}{
+			"Authorization": client.authHeader,
+		},
 	}
 	if err := client.wsConn.WriteJSON(initMessage); err != nil {
 		return fmt.Errorf("failed to send init message: %w", err)
@@ -85,13 +85,24 @@ func (client *GraphQLClient) listen() {
 
 		var result map[string]interface{}
 		if err := conn.ReadJSON(&result); err != nil {
+			client.mu.Lock()
+			client.wsConn = nil
+			client.mu.Unlock()
+
 			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
 				fmt.Println("WebSocket closed:", err)
-				client.reconnect()
+				return
+			}
+
+			if websocket.IsCloseError(err, 4401, 4403) {
+				fmt.Println("Authentication error:", err)
+				if client.authErrorHandler != nil {
+					client.authErrorHandler()
+				}
 			} else {
 				fmt.Println("WebSocket read error:", err)
-				client.reconnect()
 			}
+			client.reconnect()
 			return
 		}
 
@@ -136,14 +147,16 @@ func (client *GraphQLClient) listen() {
 		case "connection_ack":
 			fmt.Println("WebSocket connection established")
 
-		case "connection_error":
-			fmt.Println("WebSocket connection error:", result["payload"])
-
-		case "connection_keep_alive":
-			if err := conn.WriteJSON(map[string]interface{}{"type": "connection_ack"}); err != nil {
-				fmt.Println("Failed to send connection_ack message:", err)
-				return
+		case "ping":
+			pongMessage := map[string]interface{}{
+				"type": "pong",
 			}
+			if err := conn.WriteJSON(pongMessage); err != nil {
+				fmt.Println("Failed to send pong message:", err)
+			}
+
+		case "pong":
+			// Do nothing, just keep-alive
 
 		default:
 			fmt.Println("Unknown message type:", messageType)
@@ -153,13 +166,12 @@ func (client *GraphQLClient) listen() {
 
 func (client *GraphQLClient) reconnect() {
 	client.mu.Lock()
-	if client.closing {
+	if client.wsConn != nil {
 		client.mu.Unlock()
 		return
 	}
 	client.mu.Unlock()
 
-	client.closeWebSocket()
 	for {
 		fmt.Println("Attempting to reconnect...")
 		if err := client.openWebSocket(); err == nil {
@@ -179,7 +191,7 @@ func (client *GraphQLClient) resubscribeAll() {
 		variables := client.subVars[subID]
 		startMessage := map[string]interface{}{
 			"id":   subID,
-			"type": "start",
+			"type": "subscribe",
 			"payload": map[string]interface{}{
 				"query":     query,
 				"variables": variables,
