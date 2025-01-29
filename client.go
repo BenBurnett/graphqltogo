@@ -13,6 +13,11 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+type GraphQLResponse[T interface{}] struct {
+	Data   T                        `json:"data,omitempty"`
+	Errors []map[string]interface{} `json:"errors,omitempty"`
+}
+
 type Subscription struct {
 	Channel   chan interface{}
 	Query     string
@@ -30,7 +35,6 @@ type GraphQLClient struct {
 	mu               sync.Mutex
 	subs             map[string]Subscription
 	wg               sync.WaitGroup
-	closing          bool
 	authErrorHandler func()
 }
 
@@ -62,7 +66,17 @@ func (client *GraphQLClient) SetAuthErrorHandler(handler func()) {
 	client.authErrorHandler = handler
 }
 
-func (client *GraphQLClient) Execute(operation string, variables map[string]interface{}, target interface{}) error {
+func Execute[T interface{}](client *GraphQLClient, operation string, variables map[string]interface{}) (*GraphQLResponse[T], error) {
+	var result GraphQLResponse[T]
+	err := client.execute(operation, variables, &result)
+	if err != nil {
+		return nil, err
+	}
+
+	return &result, nil
+}
+
+func (client *GraphQLClient) execute(operation string, variables map[string]interface{}, result interface{}) error {
 	requestBody, err := json.Marshal(map[string]interface{}{
 		"query":     operation,
 		"variables": variables,
@@ -91,15 +105,9 @@ func (client *GraphQLClient) Execute(operation string, variables map[string]inte
 		return fmt.Errorf("failed to read response body: %w", err)
 	}
 
-	var result GraphQLResponse
-	result.Data = target
 	err = json.Unmarshal(body, &result)
 	if err != nil {
 		return fmt.Errorf("failed to unmarshal response body: %w", err)
-	}
-
-	if len(result.Errors) > 0 {
-		return fmt.Errorf("GraphQL error: %v", result.Errors[0]["message"])
 	}
 
 	return nil
@@ -109,12 +117,31 @@ func (client *GraphQLClient) generateUniqueID() string {
 	return strconv.FormatInt(atomic.AddInt64(&client.counter, 1), 10)
 }
 
-func (client *GraphQLClient) Subscribe(operation string, variables map[string]interface{}, newTarget func() interface{}) (chan interface{}, string, error) {
+func Subscribe[T interface{}](client *GraphQLClient, operation string, variables map[string]interface{}) (<-chan *GraphQLResponse[T], func() error, error) {
+	subChan, subId, err := client.subscribe(operation, variables, func() interface{} {
+		return new(GraphQLResponse[T])
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	typedChan := make(chan *GraphQLResponse[T])
+	client.wg.Add(1)
+	go func() {
+		defer client.wg.Done()
+		defer close(typedChan)
+		for msg := range subChan {
+			typedChan <- msg.(*GraphQLResponse[T])
+		}
+	}()
+	return typedChan, subId, nil
+}
+
+func (client *GraphQLClient) subscribe(operation string, variables map[string]interface{}, newTarget func() interface{}) (<-chan interface{}, func() error, error) {
 	client.mu.Lock()
-	if client.wsConn == nil || client.closing {
+	if client.wsConn == nil {
 		client.mu.Unlock()
 		if err := client.openWebSocket(); err != nil {
-			return nil, "", err
+			return nil, nil, err
 		}
 		client.mu.Lock()
 	}
@@ -148,13 +175,15 @@ func (client *GraphQLClient) Subscribe(operation string, variables map[string]in
 		if shouldClose {
 			client.closeWebSocket()
 		}
-		return nil, "", fmt.Errorf("failed to send start message: %w", err)
+		return nil, nil, fmt.Errorf("failed to send start message: %w", err)
 	}
 
-	return subChan, subID, nil
+	return subChan, func() error {
+		return client.unsubscribe(subID)
+	}, nil
 }
 
-func (client *GraphQLClient) Unsubscribe(subID string) error {
+func (client *GraphQLClient) unsubscribe(subID string) error {
 	client.mu.Lock()
 	conn := client.wsConn
 	client.mu.Unlock()
@@ -188,9 +217,4 @@ func (client *GraphQLClient) Close() {
 	} else {
 		client.mu.Unlock()
 	}
-}
-
-type GraphQLResponse struct {
-	Data   interface{}              `json:"data"`
-	Errors []map[string]interface{} `json:"errors"`
 }

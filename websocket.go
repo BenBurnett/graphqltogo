@@ -115,6 +115,9 @@ func (client *GraphQLClient) listen() {
 
 		switch result.Type {
 		case "next":
+			fallthrough
+
+		case "error":
 			subID := result.ID
 			payload := result.Payload
 			client.mu.Lock()
@@ -139,15 +142,6 @@ func (client *GraphQLClient) listen() {
 			}
 
 			sub.Channel <- target
-
-		case "error":
-			subID := result.ID
-			payload := result.Payload
-			client.mu.Lock()
-			if sub, ok := client.subs[subID]; ok {
-				sub.Channel <- fmt.Errorf("subscription error: %v", payload)
-			}
-			client.mu.Unlock()
 
 		case "complete":
 			fmt.Println("Subscription completed")
@@ -176,7 +170,6 @@ func (client *GraphQLClient) listen() {
 			}
 
 		case "pong":
-			// Do nothing, just keep-alive
 
 		default:
 			fmt.Println("Unknown message type:", result.Type)
@@ -225,8 +218,9 @@ func (client *GraphQLClient) resubscribeAll() {
 
 func (client *GraphQLClient) closeWebSocket() {
 	client.mu.Lock()
+	defer client.wg.Wait()
+	defer client.mu.Unlock()
 	if client.wsConn != nil {
-		client.closing = true
 		closeMessage := map[string]interface{}{
 			"type": "connection_terminate",
 		}
@@ -237,11 +231,6 @@ func (client *GraphQLClient) closeWebSocket() {
 			fmt.Println("Failed to close WebSocket connection:", err)
 		}
 		client.wsConn = nil
-		client.mu.Unlock() // Release the lock before waiting
-		client.wg.Wait()
-		client.mu.Lock()
-		client.closing = false
 		fmt.Println("WebSocket connection closed")
 	}
-	client.mu.Unlock()
 }
