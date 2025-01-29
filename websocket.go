@@ -131,15 +131,16 @@ func (client *GraphQLClient) handleReadError(err error) {
 		return
 	}
 
-	if websocket.IsCloseError(err, 4401, 4403) {
+	if websocket.IsCloseError(err, 4403) {
 		fmt.Println("Authentication error:", err)
 		if client.authErrorHandler != nil {
 			client.authErrorHandler()
 		}
+		client.reconnect()
 	} else {
 		fmt.Println("WebSocket read error:", err)
+		client.closeWebSocket()
 	}
-	client.reconnect()
 }
 
 func (client *GraphQLClient) handleMessage(result webSocketMessage) {

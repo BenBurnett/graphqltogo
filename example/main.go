@@ -102,7 +102,8 @@ func newActivity(client *graphqltogo.GraphQLClient, wg *sync.WaitGroup) error {
 }
 
 func main() {
-	client := graphqltogo.NewClient("http://192.168.193.128:8000/graphql", graphqltogo.WithWebSocket("ws://192.168.193.128:8000/graphql"))
+	host := "localhost:4000"
+	client := graphqltogo.NewClient("http://"+host+"/graphql", graphqltogo.WithWebSocket("ws://"+host+"/graphql"))
 	defer client.Close()
 
 	client.SetAuthErrorHandler(func() {
