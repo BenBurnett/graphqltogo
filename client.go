@@ -17,7 +17,7 @@ type Subscription struct {
 	Channel   chan interface{}
 	Query     string
 	Variables map[string]interface{}
-	Target    interface{}
+	NewTarget func() interface{}
 }
 
 type GraphQLClient struct {
@@ -109,7 +109,7 @@ func (client *GraphQLClient) generateUniqueID() string {
 	return strconv.FormatInt(atomic.AddInt64(&client.counter, 1), 10)
 }
 
-func (client *GraphQLClient) Subscribe(operation string, variables map[string]interface{}, target interface{}) (chan interface{}, string, error) {
+func (client *GraphQLClient) Subscribe(operation string, variables map[string]interface{}, newTarget func() interface{}) (chan interface{}, string, error) {
 	client.mu.Lock()
 	if client.wsConn == nil || client.closing {
 		client.mu.Unlock()
@@ -125,7 +125,7 @@ func (client *GraphQLClient) Subscribe(operation string, variables map[string]in
 		Channel:   subChan,
 		Query:     operation,
 		Variables: variables,
-		Target:    target,
+		NewTarget: newTarget,
 	}
 
 	client.mu.Unlock()

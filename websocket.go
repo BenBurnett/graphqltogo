@@ -125,19 +125,20 @@ func (client *GraphQLClient) listen() {
 				break
 			}
 
+			target := sub.NewTarget()
 			jsonData, err := json.Marshal(payload)
 			if err != nil {
 				fmt.Println("Error serializing payload:", err)
 				break
 			}
 
-			err = json.Unmarshal(jsonData, sub.Target)
+			err = json.Unmarshal(jsonData, target)
 			if err != nil {
 				fmt.Println("Error deserializing payload:", err)
 				break
 			}
 
-			sub.Channel <- sub.Target
+			sub.Channel <- target
 
 		case "error":
 			subID := result.ID
