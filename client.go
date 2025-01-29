@@ -16,7 +16,7 @@ type GraphQLResponse[T interface{}] struct {
 	Errors []map[string]interface{} `json:"errors,omitempty"`
 }
 
-type Subscription struct {
+type subscription struct {
 	Channel   chan interface{}
 	Query     string
 	Variables map[string]interface{}
@@ -31,7 +31,7 @@ type GraphQLClient struct {
 	wsConn           *websocket.Conn
 	counter          int64
 	mu               sync.Mutex
-	subs             map[string]Subscription
+	subs             map[string]subscription
 	wg               sync.WaitGroup
 	authErrorHandler func()
 }
@@ -42,7 +42,7 @@ func NewClient(httpEndpoint string, opts ...ClientOption) *GraphQLClient {
 	client := &GraphQLClient{
 		httpEndpoint: httpEndpoint,
 		httpClient:   &http.Client{},
-		subs:         make(map[string]Subscription),
+		subs:         make(map[string]subscription),
 	}
 	for _, opt := range opts {
 		opt(client)

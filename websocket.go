@@ -15,7 +15,7 @@ import (
 const maxRetries = 5
 const retryInterval = 2 * time.Second
 
-type WebSocketMessage struct {
+type webSocketMessage struct {
 	Type    string                 `json:"type"`
 	ID      string                 `json:"id,omitempty"`
 	Payload map[string]interface{} `json:"payload,omitempty"`
@@ -111,7 +111,7 @@ func (client *GraphQLClient) listen() {
 			return
 		}
 
-		var result WebSocketMessage
+		var result webSocketMessage
 		if err := conn.ReadJSON(&result); err != nil {
 			client.handleReadError(err)
 			return
@@ -142,7 +142,7 @@ func (client *GraphQLClient) handleReadError(err error) {
 	client.reconnect()
 }
 
-func (client *GraphQLClient) handleMessage(result WebSocketMessage) {
+func (client *GraphQLClient) handleMessage(result webSocketMessage) {
 	switch result.Type {
 	case "next", "error":
 		client.handleDataMessage(result)
@@ -159,7 +159,7 @@ func (client *GraphQLClient) handleMessage(result WebSocketMessage) {
 	}
 }
 
-func (client *GraphQLClient) handleDataMessage(result WebSocketMessage) {
+func (client *GraphQLClient) handleDataMessage(result webSocketMessage) {
 	subID := result.ID
 	payload := result.Payload
 	client.mu.Lock()
@@ -206,7 +206,7 @@ func (client *GraphQLClient) sendPong() {
 	conn := client.wsConn
 	client.mu.Unlock()
 
-	pongMessage := WebSocketMessage{
+	pongMessage := webSocketMessage{
 		Type: "pong",
 	}
 	if err := conn.WriteJSON(pongMessage); err != nil {
@@ -288,7 +288,7 @@ func (client *GraphQLClient) subscribe(operation string, variables map[string]in
 
 	subID := client.generateUniqueID()
 	subChan := make(chan interface{})
-	client.subs[subID] = Subscription{
+	client.subs[subID] = subscription{
 		Channel:   subChan,
 		Query:     operation,
 		Variables: variables,
@@ -308,7 +308,7 @@ func (client *GraphQLClient) subscribe(operation string, variables map[string]in
 }
 
 func (client *GraphQLClient) sendSubscribeMessage(subID, operation string, variables map[string]interface{}) error {
-	startMessage := WebSocketMessage{
+	startMessage := webSocketMessage{
 		ID:   subID,
 		Type: "subscribe",
 		Payload: map[string]interface{}{
@@ -343,7 +343,7 @@ func (client *GraphQLClient) unsubscribe(subID string) error {
 		return fmt.Errorf("no active WebSocket connection")
 	}
 
-	stopMessage := WebSocketMessage{
+	stopMessage := webSocketMessage{
 		ID:   subID,
 		Type: "complete",
 	}
