@@ -13,6 +13,12 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+type Subscription struct {
+	Channel   chan interface{}
+	Query     string
+	Variables map[string]interface{}
+}
+
 type GraphQLClient struct {
 	httpEndpoint     string
 	wsEndpoint       string
@@ -21,9 +27,7 @@ type GraphQLClient struct {
 	wsConn           *websocket.Conn
 	counter          int64
 	mu               sync.Mutex
-	subs             map[string]chan interface{}
-	subQueries       map[string]string
-	subVars          map[string]map[string]interface{}
+	subs             map[string]Subscription
 	wg               sync.WaitGroup
 	closing          bool
 	authErrorHandler func()
@@ -41,9 +45,7 @@ func NewClient(httpEndpoint string, opts ...ClientOption) *GraphQLClient {
 	client := &GraphQLClient{
 		httpEndpoint: httpEndpoint,
 		httpClient:   &http.Client{},
-		subs:         make(map[string]chan interface{}),
-		subQueries:   make(map[string]string),
-		subVars:      make(map[string]map[string]interface{}),
+		subs:         make(map[string]Subscription),
 	}
 	for _, opt := range opts {
 		opt(client)
@@ -118,9 +120,11 @@ func (client *GraphQLClient) Subscribe(operation string, variables map[string]in
 
 	subID := client.generateUniqueID()
 	subChan := make(chan interface{})
-	client.subs[subID] = subChan
-	client.subQueries[subID] = operation
-	client.subVars[subID] = variables
+	client.subs[subID] = Subscription{
+		Channel:   subChan,
+		Query:     operation,
+		Variables: variables,
+	}
 
 	client.mu.Unlock()
 
@@ -136,8 +140,6 @@ func (client *GraphQLClient) Subscribe(operation string, variables map[string]in
 	if err := client.wsConn.WriteJSON(startMessage); err != nil {
 		client.mu.Lock()
 		delete(client.subs, subID)
-		delete(client.subQueries, subID)
-		delete(client.subVars, subID)
 		shouldClose := len(client.subs) == 0
 		client.mu.Unlock()
 
@@ -171,8 +173,6 @@ func (client *GraphQLClient) Unsubscribe(subID string) error {
 
 	client.mu.Lock()
 	delete(client.subs, subID)
-	delete(client.subQueries, subID)
-	delete(client.subVars, subID)
 	client.mu.Unlock()
 
 	return nil

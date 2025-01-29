@@ -113,8 +113,8 @@ func (client *GraphQLClient) listen() {
 			subID := result["id"].(string)
 			payload := result["payload"]
 			client.mu.Lock()
-			if subChan, ok := client.subs[subID]; ok {
-				subChan <- payload
+			if sub, ok := client.subs[subID]; ok {
+				sub.Channel <- payload
 			}
 			client.mu.Unlock()
 
@@ -122,8 +122,8 @@ func (client *GraphQLClient) listen() {
 			subID := result["id"].(string)
 			payload := result["payload"]
 			client.mu.Lock()
-			if subChan, ok := client.subs[subID]; ok {
-				subChan <- fmt.Errorf("subscription error: %v", payload)
+			if sub, ok := client.subs[subID]; ok {
+				sub.Channel <- fmt.Errorf("subscription error: %v", payload)
 			}
 			client.mu.Unlock()
 
@@ -131,11 +131,9 @@ func (client *GraphQLClient) listen() {
 			fmt.Println("Subscription completed")
 			subID := result["id"].(string)
 			client.mu.Lock()
-			if subChan, ok := client.subs[subID]; ok {
-				close(subChan)
+			if sub, ok := client.subs[subID]; ok {
+				close(sub.Channel)
 				delete(client.subs, subID)
-				delete(client.subQueries, subID)
-				delete(client.subVars, subID)
 			}
 			shouldClose := len(client.subs) == 0
 			client.mu.Unlock()
@@ -186,23 +184,19 @@ func (client *GraphQLClient) reconnect() {
 func (client *GraphQLClient) resubscribeAll() {
 	client.mu.Lock()
 	defer client.mu.Unlock()
-	for subID, subChan := range client.subs {
-		query := client.subQueries[subID]
-		variables := client.subVars[subID]
+	for subID, sub := range client.subs {
 		startMessage := map[string]interface{}{
 			"id":   subID,
 			"type": "subscribe",
 			"payload": map[string]interface{}{
-				"query":     query,
-				"variables": variables,
+				"query":     sub.Query,
+				"variables": sub.Variables,
 			},
 		}
 		if err := client.wsConn.WriteJSON(startMessage); err != nil {
 			fmt.Printf("Failed to resubscribe to %s: %v\n", subID, err)
-			close(subChan)
+			close(sub.Channel)
 			delete(client.subs, subID)
-			delete(client.subQueries, subID)
-			delete(client.subVars, subID)
 		}
 	}
 }
