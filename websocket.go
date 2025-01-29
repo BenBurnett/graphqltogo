@@ -21,7 +21,7 @@ func (client *GraphQLClient) openWebSocket() error {
 	client.mu.Unlock() // Unlock before dialing
 
 	header := http.Header{}
-	header.Set("Sec-WebSocket-Protocol", "graphql-ws")
+	header.Set("Sec-WebSocket-Protocol", "graphql-transport-ws")
 	if client.authHeader != "" {
 		header.Set("Authorization", client.authHeader)
 	}
@@ -98,7 +98,7 @@ func (client *GraphQLClient) listen() {
 		messageType := result["type"].(string)
 
 		switch messageType {
-		case "data":
+		case "next":
 			subID := result["id"].(string)
 			payload := result["payload"]
 			client.mu.Lock()

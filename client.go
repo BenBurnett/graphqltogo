@@ -121,7 +121,7 @@ func (client *GraphQLClient) Subscribe(operation string, variables map[string]in
 
 	startMessage := map[string]interface{}{
 		"id":   subID,
-		"type": "start",
+		"type": "subscribe",
 		"payload": map[string]interface{}{
 			"query":     operation,
 			"variables": variables,
@@ -156,7 +156,7 @@ func (client *GraphQLClient) Unsubscribe(subID string) error {
 
 	stopMessage := map[string]interface{}{
 		"id":   subID,
-		"type": "stop",
+		"type": "complete",
 	}
 
 	fmt.Println("Unsubscribing from subscription:", subID)

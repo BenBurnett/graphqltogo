@@ -1,10 +1,11 @@
 const { ApolloServer, gql } = require('apollo-server-express');
-const { PubSub } = require('graphql-subscriptions');
 const { createServer } = require('http');
-const { execute, subscribe } = require('graphql');
-const { SubscriptionServer } = require('subscriptions-transport-ws');
 const { makeExecutableSchema } = require('@graphql-tools/schema');
 const express = require('express');
+const { useServer } = require('graphql-ws/use/ws');
+const { WebSocketServer } = require('ws');
+const { PubSub } = require('graphql-subscriptions');
+
 
 // Define the schema
 const typeDefs = gql`
@@ -53,11 +54,6 @@ const schema = makeExecutableSchema({ typeDefs, resolvers });
 // Create the Apollo Server
 const server = new ApolloServer({
   schema,
-  subscriptions: {
-    path: '/graphql',
-    onConnect: () => console.log('Connected to websocket'),
-    onDisconnect: () => console.log('Disconnected from websocket'),
-  },
   context: ({ req }) => {
     // Add any context you need here
   },
@@ -73,20 +69,37 @@ async function startServer() {
   // Create the HTTP server
   const httpServer = createServer(app);
 
+  // Create WebSocket server
+  const wsServer = new WebSocketServer({
+    server: httpServer,
+    path: '/graphql',
+  });
+
   // Add subscription support
-  SubscriptionServer.create(
-    {
-      execute,
-      subscribe,
-      schema,
-      onConnect: () => console.log('WebSocket connection established'),
-      onDisconnect: () => console.log('WebSocket connection closed'),
+  useServer({
+    schema,
+    onConnect: (ctx) => {
+      console.log('Client connected');
     },
-    {
-      server: httpServer,
-      path: '/graphql',
-    }
-  );
+    onDisconnect: (ctx) => {
+      console.log('Client disconnected');
+    },
+    onSubscribe: (ctx, msg) => {
+      console.log('Subscription started:', msg);
+    },
+    onNext: (ctx, msg, args, result) => {
+      console.log('Subscription data:', result);
+    },
+    onError: (ctx, msg, errors) => {
+      console.log('Subscription error:', errors);
+    },
+    onComplete: (ctx, msg) => {
+      console.log('Subscription completed');
+    },
+    onError: (ctx, msg, errors) => {
+      console.log('Subscription error:', errors);
+    },
+  }, wsServer);
 
   // Start the server
   httpServer.listen(4000, () => {

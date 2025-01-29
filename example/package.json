@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "graphql-ws": "^6.0.2"
+  }
+}
