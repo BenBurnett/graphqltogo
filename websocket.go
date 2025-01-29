@@ -1,6 +1,7 @@
 package graphqltogo
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -117,10 +118,26 @@ func (client *GraphQLClient) listen() {
 			subID := result.ID
 			payload := result.Payload
 			client.mu.Lock()
-			if sub, ok := client.subs[subID]; ok {
-				sub.Channel <- payload
-			}
+			sub, ok := client.subs[subID]
 			client.mu.Unlock()
+			if !ok {
+				fmt.Println("Subscription not found for ID:", subID)
+				break
+			}
+
+			jsonData, err := json.Marshal(payload)
+			if err != nil {
+				fmt.Println("Error serializing payload:", err)
+				break
+			}
+
+			err = json.Unmarshal(jsonData, sub.Target)
+			if err != nil {
+				fmt.Println("Error deserializing payload:", err)
+				break
+			}
+
+			sub.Channel <- sub.Target
 
 		case "error":
 			subID := result.ID
