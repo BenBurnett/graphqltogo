@@ -2,103 +2,131 @@ package main
 
 import (
 	"fmt"
-	"time"
+	"sync"
 
 	"github.com/BenBurnett/graphqltogo"
 )
 
-type HelloResponse struct {
-	Hello string `json:"hello"`
+func authenticate(client *graphqltogo.GraphQLClient, username, password string) error {
+	const tokenAuthMutation = `
+		mutation tokenAuth($username: String!, $password: String!) {
+			tokenAuth(username: $username, password: $password) {
+				token
+			}
+		}`
+
+	type tokenAuthResponse struct {
+		TokenAuth struct {
+			Token string
+		}
+	}
+
+	result, err := graphqltogo.Execute[tokenAuthResponse](client, tokenAuthMutation, map[string]interface{}{
+		"username": username,
+		"password": password,
+	})
+	if err != nil {
+		return err
+	}
+
+	client.SetAuthHeader("Bearer " + result.Data.TokenAuth.Token)
+	return nil
 }
 
-type EchoResponse struct {
-	Echo string `json:"echo"`
+func analyticsSummary(client *graphqltogo.GraphQLClient) error {
+	const analyticsSummary = `
+		query analyticsSummary {
+			analyticsDeviceCount
+			analyticsTaskCount
+			analyticsPluginCount
+			analyticsFileSummary {
+				count
+			}
+		}`
+
+	type analyticsSummaryResponse struct {
+		AnalyticsDeviceCount int
+		AnalyticsTaskCount   int
+		AnalyticsPluginCount int
+		AnalyticsFileSummary struct {
+			Count int
+		}
+	}
+
+	result, err := graphqltogo.Execute[analyticsSummaryResponse](client, analyticsSummary, nil)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Devices: %d, Tasks: %d, Plugins: %d, Files: %d\n",
+		result.Data.AnalyticsDeviceCount,
+		result.Data.AnalyticsTaskCount,
+		result.Data.AnalyticsPluginCount,
+		result.Data.AnalyticsFileSummary.Count)
+
+	return nil
 }
 
-const HelloQuery = `
-	query {
-		hello
+func newActivity(client *graphqltogo.GraphQLClient, wg *sync.WaitGroup) error {
+	const newActivity = `
+		subscription newActivity {
+			newActivity {
+				activity {
+					title
+				}
+			}
+		}`
+
+	type newActivityResponse struct {
+		NewActivity struct {
+			Activity struct {
+				Title string
+			}
+		}
 	}
-`
 
-const ErrorQuery = `
-	query {
-		errorQuery
-	}
-`
-
-const EchoMutation = `
-	mutation($message: String!) {
-		echo(message: $message)
-	}
-`
-
-const SubscriptionQuery = `
-	subscription {
-		messageSent
-	}
-`
-
-func main() {
-	client := graphqltogo.NewClient("http://localhost:4000/graphql", graphqltogo.WithWebSocket("ws://localhost:4000/graphql"))
-	defer client.Close()
-
-	// Query Hello
-	var helloResult HelloResponse
-	err := client.Execute(HelloQuery, nil, &helloResult)
+	subChan, _, err := graphqltogo.Subscribe[newActivityResponse](client, newActivity, nil)
 	if err != nil {
-		fmt.Println("Error:", err)
-		return
-	}
-	fmt.Println("Hello Response:", helloResult.Hello)
-
-	// Query Error
-	err = client.Execute(ErrorQuery, nil, &struct{}{})
-	if err != nil {
-		fmt.Println("Error from errorQuery:", err)
+		return fmt.Errorf("error from subscription: %w", err)
 	}
 
-	// Mutation Echo
-	var echoResult EchoResponse
-	err = client.Execute(EchoMutation, map[string]interface{}{"message": "Hello, mutation!"}, &echoResult)
-	if err != nil {
-		fmt.Println("Error from echo mutation:", err)
-		return
-	}
-	fmt.Println("Echo Response:", echoResult.Echo)
-
-	// Subscription
-	subChan, subID, err := client.Subscribe(SubscriptionQuery, nil)
-	if err != nil {
-		fmt.Println("Error from subscription:", err)
-		return
-	}
-
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		for msg := range subChan {
-			fmt.Println("Subscription Message:", msg)
+			fmt.Printf(" -- Title: %s\n", msg.Data.NewActivity.Activity.Title)
 		}
 	}()
 
-	fmt.Printf("Waiting for subscription messages...\n\n\n")
+	return nil
+}
 
-	// Mutation Echo
-	err = client.Execute(EchoMutation, map[string]interface{}{"message": "Hello, mutation again!"}, &echoResult)
-	if err != nil {
-		fmt.Println("Error from echo mutation:", err)
+func main() {
+	client := graphqltogo.NewClient("http://192.168.193.128:8000/graphql", graphqltogo.WithWebSocket("ws://192.168.193.128:8000/graphql"))
+	defer client.Close()
+
+	client.SetAuthErrorHandler(func() {
+		fmt.Println("Handling WebSocket authentication error, re-authenticating...")
+		if err := authenticate(client, "admin", "admin"); err != nil {
+			fmt.Println("Re-authentication Error:", err)
+		}
+	})
+
+	if err := authenticate(client, "admin", "admin"); err != nil {
+		fmt.Println("Authentication Error:", err)
 		return
 	}
-	fmt.Println("Echo Response:", echoResult.Echo)
 
-	// Keep the main function running to receive subscription messages
-	time.Sleep(5 * time.Second)
-
-	// Unsubscribe
-	err = client.Unsubscribe(subID)
-	if err != nil {
-		fmt.Println("Error from unsubscribe:", err)
+	if err := analyticsSummary(client); err != nil {
+		fmt.Println("Analytics Summary Error:", err)
 		return
 	}
 
-	time.Sleep(1 * time.Second)
+	var wg sync.WaitGroup
+	if err := newActivity(client, &wg); err != nil {
+		fmt.Println("New Activity Subscription Error:", err)
+		return
+	}
+
+	wg.Wait()
 }
