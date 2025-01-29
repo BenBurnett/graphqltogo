@@ -128,10 +128,10 @@ func (client *GraphQLClient) Subscribe(operation string, variables map[string]in
 
 	client.mu.Unlock()
 
-	startMessage := map[string]interface{}{
-		"id":   subID,
-		"type": "subscribe",
-		"payload": map[string]interface{}{
+	startMessage := WebSocketMessage{
+		ID:   subID,
+		Type: "subscribe",
+		Payload: map[string]interface{}{
 			"query":     operation,
 			"variables": variables,
 		},
@@ -161,9 +161,9 @@ func (client *GraphQLClient) Unsubscribe(subID string) error {
 		return fmt.Errorf("no active WebSocket connection")
 	}
 
-	stopMessage := map[string]interface{}{
-		"id":   subID,
-		"type": "complete",
+	stopMessage := WebSocketMessage{
+		ID:   subID,
+		Type: "complete",
 	}
 
 	fmt.Println("Unsubscribing from subscription:", subID)

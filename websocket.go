@@ -12,6 +12,12 @@ import (
 const maxRetries = 5
 const retryInterval = 2 * time.Second
 
+type WebSocketMessage struct {
+	Type    string                 `json:"type"`
+	ID      string                 `json:"id,omitempty"`
+	Payload map[string]interface{} `json:"payload,omitempty"`
+}
+
 func (client *GraphQLClient) openWebSocket() error {
 	client.mu.Lock()
 	if client.wsConn != nil {
@@ -83,7 +89,7 @@ func (client *GraphQLClient) listen() {
 			return
 		}
 
-		var result map[string]interface{}
+		var result WebSocketMessage
 		if err := conn.ReadJSON(&result); err != nil {
 			client.mu.Lock()
 			client.wsConn = nil
@@ -106,12 +112,10 @@ func (client *GraphQLClient) listen() {
 			return
 		}
 
-		messageType := result["type"].(string)
-
-		switch messageType {
+		switch result.Type {
 		case "next":
-			subID := result["id"].(string)
-			payload := result["payload"]
+			subID := result.ID
+			payload := result.Payload
 			client.mu.Lock()
 			if sub, ok := client.subs[subID]; ok {
 				sub.Channel <- payload
@@ -119,8 +123,8 @@ func (client *GraphQLClient) listen() {
 			client.mu.Unlock()
 
 		case "error":
-			subID := result["id"].(string)
-			payload := result["payload"]
+			subID := result.ID
+			payload := result.Payload
 			client.mu.Lock()
 			if sub, ok := client.subs[subID]; ok {
 				sub.Channel <- fmt.Errorf("subscription error: %v", payload)
@@ -129,7 +133,7 @@ func (client *GraphQLClient) listen() {
 
 		case "complete":
 			fmt.Println("Subscription completed")
-			subID := result["id"].(string)
+			subID := result.ID
 			client.mu.Lock()
 			if sub, ok := client.subs[subID]; ok {
 				close(sub.Channel)
@@ -146,8 +150,8 @@ func (client *GraphQLClient) listen() {
 			fmt.Println("WebSocket connection established")
 
 		case "ping":
-			pongMessage := map[string]interface{}{
-				"type": "pong",
+			pongMessage := WebSocketMessage{
+				Type: "pong",
 			}
 			if err := conn.WriteJSON(pongMessage); err != nil {
 				fmt.Println("Failed to send pong message:", err)
@@ -157,7 +161,7 @@ func (client *GraphQLClient) listen() {
 			// Do nothing, just keep-alive
 
 		default:
-			fmt.Println("Unknown message type:", messageType)
+			fmt.Println("Unknown message type:", result.Type)
 		}
 	}
 }
