@@ -26,7 +26,7 @@ type subscription struct {
 type GraphQLClient struct {
 	httpEndpoint     string
 	wsEndpoint       string
-	authHeader       string
+	headers          map[string]string
 	httpClient       *http.Client
 	wsConn           *websocket.Conn
 	connectionReady  bool
@@ -43,6 +43,7 @@ func NewClient(httpEndpoint string, opts ...ClientOption) *GraphQLClient {
 	client := &GraphQLClient{
 		httpEndpoint: httpEndpoint,
 		httpClient:   &http.Client{},
+		headers:      make(map[string]string),
 		subs:         make(map[string]subscription),
 	}
 	for _, opt := range opts {
@@ -57,8 +58,8 @@ func WithWebSocket(wsEndpoint string) ClientOption {
 	}
 }
 
-func (client *GraphQLClient) SetAuthHeader(authHeader string) {
-	client.authHeader = authHeader
+func (client *GraphQLClient) SetHeader(key, value string) {
+	client.headers[key] = value
 }
 
 func (client *GraphQLClient) SetAuthErrorHandler(handler func()) {
@@ -89,8 +90,8 @@ func (client *GraphQLClient) execute(operation string, variables map[string]inte
 		return fmt.Errorf("failed to create new request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if client.authHeader != "" {
-		req.Header.Set("Authorization", client.authHeader)
+	for key, value := range client.headers {
+		req.Header.Set(key, value)
 	}
 
 	resp, err := client.httpClient.Do(req)

@@ -29,7 +29,7 @@ func authenticate(client *graphqltogo.GraphQLClient, username, password string) 
 		return err
 	}
 
-	client.SetAuthHeader("Bearer " + result.Data.TokenAuth.Token)
+	client.SetHeader("Authorization", "Bearer "+result.Data.TokenAuth.Token)
 	return nil
 }
 

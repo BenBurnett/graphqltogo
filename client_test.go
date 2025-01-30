@@ -19,8 +19,8 @@ func TestNewClient(t *testing.T) {
 
 func TestSetAuthHeader(t *testing.T) {
 	client := NewClient("http://example.com")
-	client.SetAuthHeader("Bearer token")
-	assert.Equal(t, "Bearer token", client.authHeader)
+	client.SetHeader("Authorization", "Bearer token")
+	assert.Equal(t, "Bearer token", client.headers["Authorization"])
 }
 
 func TestExecute(t *testing.T) {
@@ -67,7 +67,7 @@ func TestWebSocketConnection(t *testing.T) {
 
 	wsEndpoint := "ws" + server.URL[4:]
 	client := NewClient("http://example.com", WithWebSocket(wsEndpoint))
-	client.SetAuthHeader("Bearer token")
+	client.SetHeader("Authorization", "Bearer token")
 	err := client.openWebSocket()
 	assert.NoError(t, err)
 	time.Sleep(1 * time.Second) // Give some time for the WebSocket connection to establish

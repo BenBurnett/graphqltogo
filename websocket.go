@@ -90,7 +90,7 @@ func (client *GraphQLClient) sendInitMessage() error {
 	initMessage := map[string]interface{}{
 		"type": "connection_init",
 		"payload": map[string]interface{}{
-			"Authorization": client.authHeader,
+			"Authorization": client.headers["Authorization"],
 		},
 	}
 	if err := client.wsConn.WriteJSON(initMessage); err != nil {
