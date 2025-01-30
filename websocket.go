@@ -39,6 +39,7 @@ func (client *GraphQLClient) openWebSocket() error {
 
 	client.mu.Lock()
 	client.wsConn = conn
+	client.connectionReady = false
 	client.mu.Unlock()
 
 	if err := client.sendInitMessage(); err != nil {
@@ -152,6 +153,9 @@ func (client *GraphQLClient) handleMessage(result webSocketMessage) {
 		client.handleCompleteMessage(result.ID)
 	case "connection_ack":
 		fmt.Println("WebSocket connection established")
+		client.mu.Lock()
+		client.connectionReady = true
+		client.mu.Unlock()
 	case "ping":
 		client.sendPong()
 	case "pong":
@@ -298,6 +302,17 @@ func (client *GraphQLClient) subscribe(operation string, variables map[string]in
 	}
 
 	client.mu.Unlock()
+
+	// Wait for connection_ack before sending subscribe message
+	for {
+		client.mu.Lock()
+		if client.connectionReady {
+			client.mu.Unlock()
+			break
+		}
+		client.mu.Unlock()
+		time.Sleep(100 * time.Millisecond)
+	}
 
 	if err := client.sendSubscribeMessage(subID, operation, variables); err != nil {
 		client.cleanupSubscription(subID)

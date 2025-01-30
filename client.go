@@ -29,6 +29,7 @@ type GraphQLClient struct {
 	authHeader       string
 	httpClient       *http.Client
 	wsConn           *websocket.Conn
+	connectionReady  bool
 	counter          int64
 	mu               sync.Mutex
 	subs             map[string]subscription
