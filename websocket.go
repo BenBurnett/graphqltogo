@@ -59,9 +59,9 @@ func (client *GraphQLClient) dialWebSocket(header http.Header) (*websocket.Conn,
 		fmt.Println("Connecting to WebSocket endpoint:", client.wsEndpoint)
 		conn, resp, err = websocket.DefaultDialer.Dial(client.wsEndpoint, header)
 		if err == nil {
+			defer resp.Body.Close()
 			break
 		}
-		defer resp.Body.Close()
 
 		client.logDialError(resp, err)
 		fmt.Printf("Retrying in %v...\n", retryInterval)
