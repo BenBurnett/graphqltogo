@@ -1,11 +1,15 @@
-const { ApolloServer, gql } = require('apollo-server-express');
-const { createServer } = require('http');
+const { ApolloServer } = require('@apollo/server');
+const { expressMiddleware } = require('@apollo/server/express4');
+const { ApolloServerPluginDrainHttpServer } = require('@apollo/server/plugin/drainHttpServer');
 const { makeExecutableSchema } = require('@graphql-tools/schema');
 const express = require('express');
 const { useServer } = require('graphql-ws/use/ws'); // Updated import for graphql-transport-ws
 const { WebSocketServer } = require('ws');
 const { PubSub } = require('graphql-subscriptions');
-
+const http = require('http');
+const bodyParser = require('body-parser');
+const cors = require('cors');
+const gql = require('graphql-tag');
 
 // Define the schema
 const typeDefs = gql`
@@ -56,10 +60,22 @@ const resolvers = {
     errorQuery: () => {
       throw new Error('This is an error');
     },
-    analyticsDeviceCount: () => 42, // Replace with actual logic
-    analyticsTaskCount: () => 10, // Replace with actual logic
-    analyticsPluginCount: () => 5, // Replace with actual logic
-    analyticsFileSummary: () => ({ count: 100 }), // Replace with actual logic
+    analyticsDeviceCount: (parent, args, context) => {
+      if (!context.user) throw new Error('Unauthorized');
+      return 42; // Replace with actual logic
+    },
+    analyticsTaskCount: (parent, args, context) => {
+      if (!context.user) throw new Error('Unauthorized');
+      return 10; // Replace with actual logic
+    },
+    analyticsPluginCount: (parent, args, context) => {
+      if (!context.user) throw new Error('Unauthorized');
+      return 5; // Replace with actual logic
+    },
+    analyticsFileSummary: (parent, args, context) => {
+      if (!context.user) throw new Error('Unauthorized');
+      return { count: 100 }; // Replace with actual logic
+    },
   },
   Mutation: {
     echo: (_, { message }) => {
@@ -69,7 +85,7 @@ const resolvers = {
     tokenAuth: (_, { username, password }) => {
       // Replace with actual authentication logic
       if (username === 'admin' && password === 'admin') {
-        return { token: 'fake-jwt-token' };
+        return { token: 'valid-token' };
       }
       throw new Error('Invalid credentials');
     },
@@ -79,7 +95,10 @@ const resolvers = {
       subscribe: () => pubSub.asyncIterableIterator([MESSAGE_SENT]),
     },
     newActivity: {
-      subscribe: () => pubSub.asyncIterableIterator(['NEW_ACTIVITY']),
+      subscribe: (parent, args, context) => {
+        if (!context.user) throw new Error('Unauthorized');
+        return pubSub.asyncIterableIterator(['NEW_ACTIVITY']);
+      },
     },
   },
 };
@@ -87,23 +106,24 @@ const resolvers = {
 // Create the schema
 const schema = makeExecutableSchema({ typeDefs, resolvers });
 
+// Create an Express app
+const app = express();
+const httpServer = http.createServer(app);
+
 // Create the Apollo Server
 const server = new ApolloServer({
   schema,
   context: ({ req }) => {
-    // Add any context you need here
+    const token = req.headers.authorization || '';
+    const user = token === 'Bearer valid-token' ? { username: 'admin' } : null;
+    return { user };
   },
+  plugins: [ApolloServerPluginDrainHttpServer({ httpServer })],
 });
-
-// Create an Express app
-const app = express();
 
 async function startServer() {
   await server.start();
-  server.applyMiddleware({ app, path: '/graphql' });
-
-  // Create the HTTP server
-  const httpServer = createServer(app);
+  app.use('/graphql', cors(), bodyParser.json(), expressMiddleware(server));
 
   // Create WebSocket server
   const wsServer = new WebSocketServer({
@@ -114,14 +134,26 @@ async function startServer() {
   // Add subscription support
   useServer({
     schema,
-    onConnect: (ctx) => {
-      console.log('Client connected');
+    context: (ctx) => {
+      const token = ctx.connectionParams.Authorization;
+      const user = token === 'Bearer valid-token' ? { username: 'admin' } : null;
+      return { user };
+    },
+    onConnect: async (ctx) => {
+      const token = ctx.connectionParams.Authorization;
+      const user = token === 'Bearer valid-token' ? { username: 'admin' } : null;
+      ctx.user = user;
+      console.log(ctx.user ? 'Client connected': 'Client unauthorized');
+      return !!ctx.user;
     },
     onDisconnect: (ctx) => {
       console.log('Client disconnected');
     },
     onSubscribe: (ctx, msg) => {
       console.log('Subscription started:', msg);
+    },
+    onNext: (ctx, msg, args, result) => {
+      console.log('Subscription data');
     },
     onError: (ctx, msg, errors) => {
       console.log('Subscription error:', errors);
