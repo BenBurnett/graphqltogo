@@ -61,19 +61,15 @@ const resolvers = {
       throw new Error('This is an error');
     },
     analyticsDeviceCount: (parent, args, context) => {
-      if (!context.user) throw new Error('Unauthorized');
       return 42; // Replace with actual logic
     },
     analyticsTaskCount: (parent, args, context) => {
-      if (!context.user) throw new Error('Unauthorized');
       return 10; // Replace with actual logic
     },
     analyticsPluginCount: (parent, args, context) => {
-      if (!context.user) throw new Error('Unauthorized');
       return 5; // Replace with actual logic
     },
     analyticsFileSummary: (parent, args, context) => {
-      if (!context.user) throw new Error('Unauthorized');
       return { count: 100 }; // Replace with actual logic
     },
   },
