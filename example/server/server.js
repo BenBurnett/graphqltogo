@@ -123,9 +123,6 @@ async function startServer() {
     onSubscribe: (ctx, msg) => {
       console.log('Subscription started:', msg);
     },
-    onNext: (ctx, msg, args, result) => {
-      console.log('Subscription data:', result);
-    },
     onError: (ctx, msg, errors) => {
       console.log('Subscription error:', errors);
     },
