@@ -59,10 +59,14 @@ func WithWebSocket(wsEndpoint string) ClientOption {
 }
 
 func (client *GraphQLClient) SetHeader(key, value string) {
+	client.mu.Lock()
+	defer client.mu.Unlock()
 	client.headers[key] = value
 }
 
 func (client *GraphQLClient) SetAuthErrorHandler(handler func()) {
+	client.mu.Lock()
+	defer client.mu.Unlock()
 	client.authErrorHandler = handler
 }
 
@@ -90,9 +94,11 @@ func (client *GraphQLClient) execute(operation string, variables map[string]inte
 		return fmt.Errorf("failed to create new request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	client.mu.Lock()
 	for key, value := range client.headers {
 		req.Header.Set(key, value)
 	}
+	client.mu.Unlock()
 
 	resp, err := client.httpClient.Do(req)
 	if err != nil {

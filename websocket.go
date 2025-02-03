@@ -60,7 +60,9 @@ func (client *GraphQLClient) dialWebSocket(header http.Header) (*websocket.Conn,
 		fmt.Println("Connecting to WebSocket endpoint:", client.wsEndpoint)
 		conn, resp, err = websocket.DefaultDialer.Dial(client.wsEndpoint, header)
 		if err == nil {
-			defer resp.Body.Close()
+			if resp != nil {
+				defer resp.Body.Close()
+			}
 			break
 		}
 
