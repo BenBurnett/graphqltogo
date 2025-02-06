@@ -211,13 +211,12 @@ func (client *GraphQLClient) handleCompleteMessage(subID string) {
 
 func (client *GraphQLClient) sendPong() {
 	client.mu.Lock()
-	conn := client.wsConn
-	client.mu.Unlock()
+	defer client.mu.Unlock()
 
 	pongMessage := webSocketMessage{
 		Type: "pong",
 	}
-	if err := conn.WriteJSON(pongMessage); err != nil {
+	if err := client.wsConn.WriteJSON(pongMessage); err != nil {
 		fmt.Println("Failed to send pong message:", err)
 	}
 }
@@ -316,6 +315,8 @@ func (client *GraphQLClient) subscribe(operation string, variables map[string]in
 		time.Sleep(100 * time.Millisecond)
 	}
 
+	client.mu.Lock()
+	defer client.mu.Unlock()
 	if err := client.sendSubscribeMessage(subID, operation, variables); err != nil {
 		client.cleanupSubscription(subID)
 		return nil, nil, err
@@ -355,10 +356,9 @@ func (client *GraphQLClient) cleanupSubscription(subID string) {
 
 func (client *GraphQLClient) unsubscribe(subID string) error {
 	client.mu.Lock()
-	conn := client.wsConn
-	client.mu.Unlock()
+	defer client.mu.Unlock()
 
-	if conn == nil {
+	if client.wsConn == nil {
 		return fmt.Errorf("no active WebSocket connection")
 	}
 
@@ -368,13 +368,9 @@ func (client *GraphQLClient) unsubscribe(subID string) error {
 	}
 
 	fmt.Println("Unsubscribing from subscription:", subID)
-	if err := conn.WriteJSON(stopMessage); err != nil {
+	if err := client.wsConn.WriteJSON(stopMessage); err != nil {
 		return fmt.Errorf("failed to send stop message: %w", err)
 	}
-
-	client.mu.Lock()
-	delete(client.subs, subID)
-	client.mu.Unlock()
 
 	return nil
 }
